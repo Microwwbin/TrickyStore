@@ -14,21 +14,35 @@ using zygisk::AppSpecializeArgs;
 using zygisk::ServerSpecializeArgs;
 using namespace std::string_view_literals;
 
-struct spoof_config {
-    std::string manufacturer{"Google"};
-    std::string model{"Pixel"};
-    std::string fingerprint{"google/sailfish/sailfish:8.1.0/OPM1.171019.011/4448085:user/release-keys"};
-    std::string brand{"google"};
-    std::string product{"sailfish"};
-    std::string device{"sailfish"};
-    std::string release{"8.1.0"};
-    std::string id{"OPM1.171019.011"};
-    std::string incremental{"4448085"};
-    std::string security_patch{"2017-12-05"};
-    std::string type{"user"};
-    std::string tags{"release-keys"};
+struct spoof_config_default {
+    std::string MANUFACTURER{"Google"};
+    std::string MODEL{"Pixel"};
+    std::string FINGERPRINT{"google/sailfish/sailfish:8.1.0/OPM1.171019.011/4448085:user/release-keys"};
+    std::string BRAND{"google"};
+    std::string PRODUCT{"sailfish"};
+    std::string DEVICE{"sailfish"};
+    std::string RELEASE{"8.1.0"};
+    std::string ID{"OPM1.171019.011"};
+    std::string INCREMENTAL{"4448085"};
+    std::string SECURITY_PATCH{"2017-12-05"};
+    std::string TYPE{"user"};
+    std::string TAGS{"release-keys"};
 };
 
+struct spoof_config {
+    std::string MANUFACTURER;
+    std::string MODEL;
+    std::string FINGERPRINT;
+    std::string BRAND;
+    std::string PRODUCT;
+    std::string DEVICE;
+    std::string RELEASE;
+    std::string ID;
+    std::string INCREMENTAL;
+    std::string SECURITY_PATCH;
+    std::string TYPE;
+    std::string TAGS;
+};
 
 ssize_t xread(int fd, void *buffer, size_t count) {
     ssize_t total = 0;
@@ -106,18 +120,18 @@ public:
             auto buildClass = env_->FindClass("android/os/Build");
             auto buildVersionClass = env_->FindClass("android/os/Build$VERSION");
 
-            setField(buildClass, "MANUFACTURER", std::move(spoofConfig.manufacturer));
-            setField(buildClass, "MODEL", std::move(spoofConfig.model));
-            setField(buildClass, "FINGERPRINT", std::move(spoofConfig.fingerprint));
-            setField(buildClass, "BRAND", std::move(spoofConfig.brand));
-            setField(buildClass, "PRODUCT", std::move(spoofConfig.product));
-            setField(buildClass, "DEVICE", std::move(spoofConfig.device));
-            setField(buildVersionClass, "RELEASE", std::move(spoofConfig.release));
-            setField(buildClass, "ID", std::move(spoofConfig.id));
-            setField(buildVersionClass, "INCREMENTAL", std::move(spoofConfig.incremental));
-            setField(buildVersionClass, "SECURITY_PATCH", std::move(spoofConfig.security_patch));
-            setField(buildClass, "TYPE", std::move(spoofConfig.type));
-            setField(buildClass, "TAGS", std::move(spoofConfig.tags));
+            setField(buildClass, "MANUFACTURER", std::move(spoofConfig.MANUFACTURER));
+            setField(buildClass, "MODEL", std::move(spoofConfig.MODEL));
+            setField(buildClass, "FINGERPRINT", std::move(spoofConfig.FINGERPRINT));
+            setField(buildClass, "BRAND", std::move(spoofConfig.BRAND));
+            setField(buildClass, "PRODUCT", std::move(spoofConfig.PRODUCT));
+            setField(buildClass, "DEVICE", std::move(spoofConfig.DEVICE));
+            setField(buildVersionClass, "RELEASE", std::move(spoofConfig.RELEASE));
+            setField(buildClass, "ID", std::move(spoofConfig.ID));
+            setField(buildVersionClass, "INCREMENTAL", std::move(spoofConfig.INCREMENTAL));
+            setField(buildVersionClass, "SECURITY_PATCH", std::move(spoofConfig.SECURITY_PATCH));
+            setField(buildClass, "TYPE", std::move(spoofConfig.TYPE));
+            setField(buildClass, "TAGS", std::move(spoofConfig.TAGS));
         }
 
         env_->ReleaseStringUTFChars(args->nice_name, nice_name);
@@ -133,12 +147,13 @@ private:
     JNIEnv *env_;
 
     inline void setField(jclass clazz, const char* field, std::string&& value) {
+        if (value.empty()) return;
         auto id = env_->GetStaticFieldID(clazz, field, "Ljava/lang/String;");
         env_->SetStaticObjectField(clazz, id, env_->NewStringUTF(value.c_str()));
     }
 };
 
-static inline void write_spoof_configs(const struct spoof_config& spoofConfig) {
+static inline void write_spoof_configs(const struct spoof_config_default& spoofConfig) {
     std::string buffer{};
 
     if (glz::write<glz::opts{.prettify = true}>(spoofConfig, buffer)) [[unlikely]] {
@@ -174,10 +189,15 @@ static void companion_handler(int fd) {
     }
 
     spoof_config spoofConfig{};
-    auto ec = glz::read_file_json(spoofConfig, "/data/adb/tricky_store/spoof_build_vars"sv, std::string{});
+    auto ec = glz::read_file_json<glz::opts{.error_on_unknown_keys = false}>
+            (spoofConfig, "/data/adb/tricky_store/spoof_build_vars"sv, std::string{});
     if (ec) [[unlikely]] {
         LOGW("[companion_handler] Failed to parse spoof_build_vars, writing and using default spoof config...");
-        write_spoof_configs(spoofConfig);
+        spoof_config_default spoofConfigDefault{};
+        write_spoof_configs(spoofConfigDefault);
+        // Retry reading spoofConfig using default values
+        glz::read_file_json<glz::opts{.error_on_unknown_keys = false}>
+                (spoofConfig, "/data/adb/tricky_store/spoof_build_vars"sv, std::string{});
     }
 
     std::string buffer = glz::write_json(spoofConfig).value_or("");
